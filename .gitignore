@@ -147,3 +147,6 @@ dmypy.json
 http_cache.sqlite
 downloads/
 logs/
+
+# Internal tasks to ignore
+src/dev_*
