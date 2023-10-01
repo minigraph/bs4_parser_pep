@@ -6,3 +6,5 @@ paths =
 max-complexity = 10
 exclude =
   tests
+  venv
+  src/dev_pep.py
