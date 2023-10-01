@@ -10,36 +10,50 @@ from tqdm import tqdm
 
 from configs import configure_argument_parser, configure_logging
 from constants import (BASE_DIR, DATETIME_FORMAT, EXPECTED_STATUS,
-                       MAIN_DOC_URL, PEP_URL)
+                       MAIN_DOC_URL, PEP_URL, HTMLTag, HTMLAttr, HTMLValue)
 from outputs import control_output
 from utils import find_tag, get_response
+
+# Паттерн поиска версии и статуса ссылки
+PATTERN_VS = r'Python (?P<version>\d\.\d+) \((?P<status>.*)\)'
+# Паттерн поиска ссылки на архив документации
+PATTERN_HREF = r'.+pdf-a4\.zip$'
+FEATURE_LXML = 'lxml'
 
 
 def whats_new(session):
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
     response = get_response(session, whats_new_url)
-    if response is None:
+    if not response:
         return
 
-    soup = BeautifulSoup(response.text, features='lxml')
-    main_div = find_tag(soup, 'section', attrs={'id': 'what-s-new-in-python'})
-    div_with_ul = find_tag(main_div, 'div', attrs={'class': 'toctree-wrapper'})
+    soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+    main_div = find_tag(
+        soup,
+        HTMLTag.SECTION,
+        attrs={HTMLAttr.ID: HTMLValue.WHATNEW}
+    )
+    div_with_ul = find_tag(
+        main_div,
+        HTMLTag.DIV,
+        attrs={HTMLAttr.CLASS: HTMLValue.TREE_WR}
+    )
     sections_by_python = div_with_ul.find_all(
-        'li',
-        attrs={'class': 'toctree-l1'}
+        HTMLTag.LI,
+        attrs={HTMLAttr.CLASS: HTMLValue.TREE_L1}
     )
 
     result = [('Ссылка на статью', 'Заголовок', 'Редактор, Автор')]
     for section in tqdm(sections_by_python):
-        version_a_tag = find_tag(section, 'a')
-        version_link = urljoin(whats_new_url, version_a_tag['href'])
+        version_a_tag = find_tag(section, HTMLTag.A)
+        version_link = urljoin(whats_new_url, version_a_tag[HTMLAttr.HREF])
 
         response = get_response(session, version_link)
-        if response is None:
+        if not response:
             continue
 
-        soup = BeautifulSoup(response.text, features='lxml')
-        h1, dl = find_tag(soup, 'h1'), find_tag(soup, 'dl')
+        soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+        h1, dl = find_tag(soup, HTMLTag.H1), find_tag(soup, HTMLTag.DL)
         dl_text = dl.text.replace('\n', ' ')
         result.append((version_link, h1.text, dl_text))
 
@@ -48,24 +62,27 @@ def whats_new(session):
 
 def latest_versions(session):
     response = get_response(session, MAIN_DOC_URL)
-    if response is None:
+    if not response:
         return
 
-    soup = BeautifulSoup(response.text, features='lxml')
-    sidebar = find_tag(soup, 'div', attrs={'class': 'sphinxsidebarwrapper'})
-    ul_tags = sidebar.find_all('ul')
+    soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+    sidebar = find_tag(
+        soup,
+        HTMLTag.DIV,
+        attrs={HTMLAttr.CLASS: HTMLValue.SPHINX}
+    )
+    ul_tags = sidebar.find_all(HTMLTag.UL)
     for ul in ul_tags:
         if 'All versions' in ul.text:
-            a_tags = ul.find_all('a')
+            a_tags = ul.find_all(HTMLTag.A)
             break
     else:
         raise Exception('Ничего не нашлось')
 
-    pattern = r'Python (?P<version>\d\.\d+) \((?P<status>.*)\)'
     result = [('Ссылка на документацию', 'Версия', 'Статус')]
     for a in a_tags:
-        link = a['href']
-        text_match = re.search(pattern, a.text)
+        link = a[HTMLAttr.HREF]
+        text_match = re.search(PATTERN_VS, a.text)
         version, status = a.text, ''
         if text_match is not None:
             version, status = text_match.groups()
@@ -78,18 +95,22 @@ def latest_versions(session):
 def download(session):
     downloads_url = urljoin(MAIN_DOC_URL, 'download.html')
     response = get_response(session, downloads_url)
-    if response is None:
+    if not response:
         return
 
-    soup = BeautifulSoup(response.text, features='lxml')
-    table_tag = find_tag(soup, 'table', {'class': 'docutils'})
+    soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+    table_tag = find_tag(
+        soup,
+        HTMLTag.TABLE,
+        {HTMLAttr.CLASS: HTMLValue.DOCUTILS}
+    )
     pdf_a4_tag = find_tag(
         table_tag,
-        'a',
-        {'href': re.compile(r'.+pdf-a4\.zip$')}
+        HTMLTag.A,
+        {HTMLAttr.HREF: re.compile(PATTERN_HREF)}
     )
 
-    archive_url = urljoin(downloads_url, pdf_a4_tag['href'])
+    archive_url = urljoin(downloads_url, pdf_a4_tag[HTMLAttr.HREF])
     filename = archive_url.split('/')[-1]
 
     downloads_dir = BASE_DIR / 'downloads'
@@ -105,34 +126,42 @@ def download(session):
 
 def pep(session):
     response = get_response(session, PEP_URL)
-    if response is None:
+    if not response:
         return
 
     dict_status, list_error_status = dict(), []
-    soup = BeautifulSoup(response.text, features='lxml')
-    section = find_tag(soup, 'section', {'id': 'pep-content'})
+    soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+    section = find_tag(
+        soup,
+        HTMLTag.SECTION,
+        {HTMLAttr.ID: HTMLValue.PEP_CONTENT}
+    )
     tag_tables = section.find_all(
-        'table',
-        {'class': 'pep-zero-table docutils align-default'}
+        HTMLTag.TABLE,
+        {HTMLAttr.CLASS: HTMLValue.PEP_ZERO}
     )
     for table in tag_tables:
-        tbody = find_tag(table, 'tbody')
-        tr_rows = tbody.find_all('tr')
+        tbody = find_tag(table, HTMLTag.TBODY)
+        tr_rows = tbody.find_all(HTMLTag.TR)
         for row in tr_rows:
-            pep_a_tag = find_tag(row, 'a', {'class': 'pep reference internal'})
-            pep_link = urljoin(PEP_URL, pep_a_tag['href'])
+            pep_a_tag = find_tag(
+                row,
+                HTMLTag.A,
+                {HTMLAttr.CLASS: HTMLValue.PEP_REF}
+            )
+            pep_link = urljoin(PEP_URL, pep_a_tag[HTMLAttr.HREF])
             response = get_response(session, pep_link)
-            if response is None:
+            if not response:
                 continue
 
-            abbr_tag = row.find_all('abbr')
+            abbr_tag = row.find_all(HTMLTag.ABBR)
             table_status = ('Active', 'Draft')
             if len(abbr_tag) == 1 and len(abbr_tag[0].text) == 2:
                 table_status = EXPECTED_STATUS[abbr_tag[0].text[1]]
 
-            soup = BeautifulSoup(response.text, features='lxml')
-            dl = find_tag(soup, 'dl', {'class': 'rfc2822 field-list simple'})
-            page_status = find_tag(dl, 'abbr').text
+            soup = BeautifulSoup(response.text, features=FEATURE_LXML)
+            dl = find_tag(soup, HTMLTag.DL, {HTMLAttr.CLASS: HTMLValue.RFC})
+            page_status = find_tag(dl, HTMLTag.ABBR).text
             if page_status in table_status:
                 if page_status in dict_status.keys():
                     dict_status[page_status] += 1
